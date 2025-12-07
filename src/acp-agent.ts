@@ -95,7 +95,6 @@ export class AiderAcpAgent implements protocol.Agent {
       availableModels: this.availableModels,
       currentModelId: this.defaultModelId,
     };
-
     return {
       protocolVersion: negotiatedProtocol,
       agentInfo: {
@@ -287,7 +286,7 @@ export class AiderAcpAgent implements protocol.Agent {
     }
 
     // Manejar recursos primero (archivos)
-    if (resources.length > 0) {
+    if (resources.length > 0 || session.files.length > 0) {
       this.sendThought(sessionId, "Processing referenced resources.");
       await this.processResources(sessionId, session, resources);
 
@@ -606,6 +605,9 @@ ${errorStr}`,
     session: SessionState,
     resources: Array<protocol.ContentBlock>,
   ): Promise<void> {
+    const desiredPaths: string[] = [];
+    const seenPaths = new Set<string>();
+
     for (const block of resources) {
       if (session.cancelled) return;
 
@@ -619,8 +621,10 @@ ${errorStr}`,
           continue;
         }
 
-        session.aiderProcess?.sendCommand(`/add ${normalizedPath}`);
-        await this.waitForTurnCompletion(sessionId, session);
+        if (!seenPaths.has(normalizedPath)) {
+          seenPaths.add(normalizedPath);
+          desiredPaths.push(normalizedPath);
+        }
         continue;
       }
 
@@ -646,10 +650,88 @@ ${errorStr}`,
           continue;
         }
 
-        session.aiderProcess?.sendCommand(`/add ${normalizedPath}`);
-        await this.waitForTurnCompletion(sessionId, session);
+        if (!seenPaths.has(normalizedPath)) {
+          seenPaths.add(normalizedPath);
+          desiredPaths.push(normalizedPath);
+        }
       }
     }
+
+    await this.removeDroppedFiles(sessionId, session, desiredPaths);
+
+    for (const normalizedPath of desiredPaths) {
+      if (session.files.includes(normalizedPath)) {
+        continue;
+      }
+
+      session.aiderProcess?.sendCommand(`/add ${normalizedPath}`);
+      await this.waitForTurnCompletion(sessionId, session);
+      session.files.push(normalizedPath);
+    }
+
+    if (desiredPaths.length > 0 || session.files.length === 0) {
+      this.emitActiveFilesUpdate(sessionId, session);
+    }
+  }
+
+  private async removeDroppedFiles(
+    sessionId: string,
+    session: SessionState,
+    desiredPaths: string[],
+  ): Promise<void> {
+    const desiredSet = new Set(desiredPaths.map((filePath) => path.normalize(filePath)));
+    const droppedFiles = session.files.filter((filePath) => !desiredSet.has(filePath));
+
+    if (droppedFiles.length === 0) {
+      return;
+    }
+
+    this.sendThought(
+      sessionId,
+      `Dropping deselected files: ${droppedFiles.map((filePath) => path.basename(filePath)).join(", ")}`,
+    );
+
+    for (const filePath of droppedFiles) {
+      if (session.cancelled) return;
+
+      session.aiderProcess?.sendCommand(`/drop ${filePath}`);
+      await this.waitForTurnCompletion(sessionId, session);
+    }
+
+    session.files = session.files.filter((filePath) => desiredSet.has(filePath));
+  }
+
+  private emitActiveFilesUpdate(sessionId: string, session: SessionState): void {
+    const activeMessage =
+      session.files.length > 0
+        ? `Active files (${session.files.length}): ${session.files.join(", ")}`
+        : "No active files selected.";
+
+    this.sendThought(sessionId, activeMessage);
+
+    if (!session.currentPlan) {
+      return;
+    }
+
+    const updatedPlan: Plan = {
+      entries: session.currentPlan.entries.map((entry) => ({ ...entry })),
+    };
+
+    const existingIndex = updatedPlan.entries.findIndex((entry) =>
+      entry.content.startsWith("Active files"),
+    );
+
+    if (existingIndex >= 0) {
+      updatedPlan.entries[existingIndex].content = activeMessage;
+    } else {
+      updatedPlan.entries.unshift({
+        content: activeMessage,
+        priority: "medium",
+        status: "completed",
+      });
+    }
+
+    this.sendPlanUpdate(sessionId, session, updatedPlan);
   }
 
   private async writeEmbeddedResource(
