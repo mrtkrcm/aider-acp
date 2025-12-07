@@ -87,8 +87,9 @@ export class AiderAcpAgent implements protocol.Agent {
     request: protocol.InitializeRequest,
   ): Promise<protocol.InitializeResponse> {
     const supportedProtocolVersion = 1;
-    // ACP spec: if the requested version is unsupported, respond with the latest version the agent supports.
     const negotiatedProtocol = supportedProtocolVersion;
+
+    // ACP spec: if the requested version is unsupported, respond with the latest version the agent supports.
 
     const modelState: protocol.SessionModelState = {
       availableModels: this.availableModels,
