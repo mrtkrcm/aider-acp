@@ -21,8 +21,8 @@ export class AiderAcpAgent implements protocol.Agent {
     request: protocol.InitializeRequest,
   ): Promise<protocol.InitializeResponse> {
     const supportedProtocolVersion = 1;
-    const requestedProtocol = request.protocolVersion ?? supportedProtocolVersion;
-    const negotiatedProtocol = Math.min(requestedProtocol, supportedProtocolVersion);
+    // ACP spec: if the requested version is unsupported, respond with the latest version the agent supports.
+    const negotiatedProtocol = supportedProtocolVersion;
 
     return {
       protocolVersion: negotiatedProtocol,
@@ -37,11 +37,6 @@ export class AiderAcpAgent implements protocol.Agent {
           image: false,
           audio: false,
           embeddedContext: true,
-        },
-        // Added via ACP guide; not present in SDK 0.4.8 typings
-        sessionCapabilities: {
-          modes: true,
-          plans: true,
         },
         mcpCapabilities: {
           http: false,
@@ -329,7 +324,7 @@ export class AiderAcpAgent implements protocol.Agent {
 
       // Enviar bloques de edición como tool calls con diffs ACP
       if (editBlocks.length > 0) {
-        const acpDiffs = convertEditBlocksToACPDiffs(editBlocks);
+        const acpDiffs = convertEditBlocksToACPDiffs(editBlocks, session.workingDir);
         for (let i = 0; i < acpDiffs.length; i++) {
           const diff = acpDiffs[i];
           const toolCallId = `edit_${Date.now()}_${i}`;

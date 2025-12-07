@@ -9,6 +9,7 @@ import {
   seq,
   tok,
 } from "typescript-parsec";
+import * as path from "node:path";
 
 export interface AiderInfo {
   version?: string;
@@ -628,18 +629,30 @@ function isValidFilePath(path: string): boolean {
   );
 }
 
-export function convertEditBlocksToACPDiffs(editBlocks: EditBlock[]): Array<{
+export function convertEditBlocksToACPDiffs(
+  editBlocks: EditBlock[],
+  workingDir?: string,
+): Array<{
   type: "diff";
   path: string;
   oldText: string | null;
   newText: string;
 }> {
-  return editBlocks.map((block) => ({
-    type: "diff" as const,
-    path: block.path,
-    oldText: block.oldText || null,
-    newText: block.newText,
-  }));
+  const baseDir = workingDir && workingDir.trim().length > 0 ? workingDir : process.cwd();
+
+  return editBlocks.map((block) => {
+    const rawPath = block.path?.trim() ?? "";
+    const normalizedPath = path.isAbsolute(rawPath)
+      ? path.normalize(rawPath)
+      : path.normalize(path.join(baseDir, rawPath));
+
+    return {
+      type: "diff" as const,
+      path: normalizedPath,
+      oldText: block.oldText ?? null,
+      newText: block.newText,
+    };
+  });
 }
 
 export function formatAiderInfo(info: AiderInfo): string {
