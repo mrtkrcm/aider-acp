@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: ^0.4.8
-        version: 0.4.8
+        specifier: ^0.7.0
+        version: 0.7.0(zod@3.25.76)
       typescript-parsec:
         specifier: ^0.3.4
         version: 0.3.4
@@ -24,8 +24,10 @@ importers:
 
 packages:
 
-  '@agentclientprotocol/sdk@0.4.8':
-    resolution: {integrity: sha512-2hN2CMMWtYVHrUeuapwLu66S2wwOPhq+bLqAryl1cQjKjL5Mzkfq+oxFYFvGdPvBoKpJSxM2pIIQiUH8tGZ3rg==}
+  '@agentclientprotocol/sdk@0.7.0':
+    resolution: {integrity: sha512-lZrBwaP7qpDgwvhZOl61te9bpigpOXJfVTwLWqjMsnZI7oe5rgHdxGWfTHcqiRy4ITg9qbz3ApgYsxKoZpYMhg==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@types/node@24.9.1':
     resolution: {integrity: sha512-QoiaXANRkSXK6p0Duvt56W208du4P9Uye9hWLWgGMDTEoKPhuenzNcC4vGUmrNkiOKTlIrBoyNQYNpSwfEZXSg==}
@@ -46,7 +48,7 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/sdk@0.4.8':
+  '@agentclientprotocol/sdk@0.7.0(zod@3.25.76)':
     dependencies:
       zod: 3.25.76
 

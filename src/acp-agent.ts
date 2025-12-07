@@ -9,20 +9,92 @@ import {
   convertEditBlocksToACPDiffs,
 } from "./aider-output-parser.js";
 
+const DEFAULT_MODELS: protocol.ModelInfo[] = [
+  {
+    modelId: "gemini/gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Fast, cost-effective default",
+  },
+];
+
+function isModelInfo(candidate: unknown): candidate is protocol.ModelInfo {
+  if (!candidate || typeof candidate !== "object") {
+    return false;
+  }
+
+  const potentialModel = candidate as { [key: string]: unknown };
+  return (
+    typeof potentialModel.modelId === "string" && typeof potentialModel.name === "string"
+  );
+}
+
+function loadConfiguredModels(): protocol.ModelInfo[] {
+  const configuredModels = process.env.AIDER_MODELS;
+
+  if (!configuredModels) {
+    return DEFAULT_MODELS;
+  }
+
+  try {
+    const parsed = JSON.parse(configuredModels) as unknown;
+    if (Array.isArray(parsed)) {
+      const validModels = parsed
+        .filter(isModelInfo)
+        .map((model) => ({
+          modelId: model.modelId,
+          name: model.name,
+          description:
+            typeof model.description === "string" ? model.description : undefined,
+        }));
+
+      if (validModels.length > 0) {
+        return validModels;
+      }
+    }
+  } catch (error) {
+    console.warn("Failed to parse AIDER_MODELS JSON; using default models.", error);
+  }
+
+  return DEFAULT_MODELS;
+}
+
+function resolveDefaultModelId(availableModels: protocol.ModelInfo[]): string {
+  const configuredDefault = process.env.AIDER_DEFAULT_MODEL;
+
+  if (
+    configuredDefault &&
+    availableModels.some((model) => model.modelId === configuredDefault)
+  ) {
+    return configuredDefault;
+  }
+
+  return availableModels[0]?.modelId ?? DEFAULT_MODELS[0].modelId;
+}
+
 export class AiderAcpAgent implements protocol.Agent {
   private sessions: Map<string, SessionState> = new Map();
   private client: protocol.AgentSideConnection;
+  private availableModels: protocol.ModelInfo[];
+  private defaultModelId: string;
 
   constructor(client: protocol.AgentSideConnection) {
     this.client = client;
+    this.availableModels = loadConfiguredModels();
+    this.defaultModelId = resolveDefaultModelId(this.availableModels);
   }
 
   async initialize(
     request: protocol.InitializeRequest,
   ): Promise<protocol.InitializeResponse> {
     const supportedProtocolVersion = 1;
-    // ACP spec: if the requested version is unsupported, respond with the latest version the agent supports.
     const negotiatedProtocol = supportedProtocolVersion;
+
+    // ACP spec: if the requested version is unsupported, respond with the latest version the agent supports.
+
+    const modelState: protocol.SessionModelState = {
+      availableModels: this.availableModels,
+      currentModelId: this.defaultModelId,
+    };
 
     return {
       protocolVersion: negotiatedProtocol,
@@ -44,6 +116,9 @@ export class AiderAcpAgent implements protocol.Agent {
         },
       } as protocol.AgentCapabilities,
       authMethods: [],
+      _meta: {
+        models: modelState,
+      },
     } as protocol.InitializeResponse;
   }
 
@@ -52,9 +127,9 @@ export class AiderAcpAgent implements protocol.Agent {
   ): Promise<protocol.NewSessionResponse> {
     const sessionId = `sess_${Date.now()}`;
     const workingDir = params.cwd || process.cwd();
-    // const model = "openrouter/deepseek/deepseek-chat-v3.1:free"; // Or get from params
-    // const model = "opentouer/deepseek/deepseek-chat-v3-0324:free"; // Or get from params
-    const model = "gemini/gemini-2.5-flash"; // Or get from params
+
+    const requestedModel = this.extractRequestedModel(params._meta);
+    const model = this.resolveModel(requestedModel);
 
     const aiderProcess = new AiderProcessManager(workingDir, model);
 
@@ -78,7 +153,45 @@ export class AiderAcpAgent implements protocol.Agent {
       this.sendModeUpdate(sessionId, session.currentMode);
     }
 
-    return { sessionId };
+    return {
+      sessionId,
+      models: {
+        availableModels: this.availableModels,
+        currentModelId: model,
+      },
+    };
+  }
+
+  private extractRequestedModel(
+    meta: Record<string, unknown> | null | undefined,
+  ): string | undefined {
+    if (!meta || typeof meta !== "object") {
+      return undefined;
+    }
+
+    const modelId = (meta as { modelId?: unknown }).modelId;
+    const model = (meta as { model?: unknown }).model;
+
+    if (typeof modelId === "string") {
+      return modelId;
+    }
+
+    if (typeof model === "string") {
+      return model;
+    }
+
+    return undefined;
+  }
+
+  private resolveModel(requestedModel?: string): string {
+    if (
+      requestedModel &&
+      this.availableModels.some((model) => model.modelId === requestedModel)
+    ) {
+      return requestedModel;
+    }
+
+    return this.defaultModelId;
   }
 
   async prompt(
