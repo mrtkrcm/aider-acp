@@ -12,4 +12,5 @@ export interface SessionState {
   commandQueue: string[];
   pendingPromptId?: string | number;
   lastPromptText?: string;
+  cancelled?: boolean;
 }
