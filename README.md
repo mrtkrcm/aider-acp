@@ -52,6 +52,23 @@ aider-acp/
 - **Git** (Aider expects a git repo to track changes)
 - **Zed Editor** or other editor with ACP support (v0.201.5+)
 
+### Configure model choices
+
+The agent advertises selectable models to clients via the `initialize` response and remembers the chosen model in each session. You can customize the available list through environment variables when launching the agent:
+
+- `AIDER_MODELS`: JSON array of `{ modelId, name, description? }` entries.
+- `AIDER_DEFAULT_MODEL`: Optional default model ID. If omitted or invalid, the first `AIDER_MODELS` entry is used.
+
+Example:
+
+```bash
+export AIDER_MODELS='[
+  {"modelId":"gemini/gemini-2.5-flash","name":"Gemini 2.5 Flash","description":"Fast default"},
+  {"modelId":"openrouter/deepseek/deepseek-chat-v3.1:free","name":"DeepSeek Chat"}
+]'
+export AIDER_DEFAULT_MODEL="gemini/gemini-2.5-flash"
+```
+
 ---
 
 ## 🔧 Installation & Setup
@@ -98,6 +115,11 @@ Add this configuration to your Zed settings (`cmd/ctrl + ,` → Open `settings.j
 ```
 
 > **Important**: Replace `/absolute/path/to/your/aider-acp/` with the actual absolute path to your cloned project.
+
+#### Model selection in Zed UI
+
+- On startup, Zed receives `_meta.models` from the agent's `initialize` response (available options + default ID). Render these options in your UI so users can pick a model.
+- When creating a session, send the selected model in `session/new` using `_meta.modelId` (or `_meta.model`). The agent will launch Aider with that model and persist it in `SessionState`. If you omit it, the default model defined via the environment variables above is used.
 
 ### 4. Use in Zed
 
