@@ -95,7 +95,6 @@ export class AiderAcpAgent implements protocol.Agent {
       availableModels: this.availableModels,
       currentModelId: this.defaultModelId,
     };
-
     return {
       protocolVersion: negotiatedProtocol,
       agentInfo: {
