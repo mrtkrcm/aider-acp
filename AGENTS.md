@@ -16,8 +16,14 @@
 - **Comments**: JSDoc for public APIs, inline comments for complex logic only
 
 ## Testing
-- No test framework configured yet - add Jest or similar when implementing tests
-- Run single test: `pnpm test -- <test-file>` (once configured)
+- **Framework**: Vitest with v8 coverage
+- `pnpm test` - Run all tests once
+- `pnpm test:watch` - Run tests in watch mode
+- `pnpm test:coverage` - Run tests with coverage report
+- Run single test file: `pnpm test src/prompt-parser.test.ts`
+- Run specific test: `pnpm test -t "parses valid /add command"`
+- Tests are co-located with source (`*.test.ts` suffix)
+- Coverage threshold: aim for >70% on parser modules
 
 ## Git Workflow
 - Use `git diff` to track changes after Aider modifications

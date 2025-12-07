@@ -166,6 +166,45 @@ Aider: *receives context and makes improvements*
 
 ---
 
+## 🧪 Testing
+
+This project uses [Vitest](https://vitest.dev/) for unit testing with coverage support.
+
+### Running Tests
+
+```bash
+# Run tests once
+pnpm test
+
+# Run tests in watch mode (re-runs on file changes)
+pnpm test:watch
+
+# Run tests with coverage report
+pnpm test:coverage
+```
+
+### Test Coverage
+
+Current test coverage includes:
+- **Slash command parser** (`prompt-parser.ts`): Validates `/add`, `/drop`, `/ls`, `/run` commands
+- **Aider output parser** (`aider-output-parser.ts`): Parses SEARCH/REPLACE blocks, udiff, whole-file formats
+- **ACP diff conversion**: Ensures relative paths are normalized to absolute paths
+
+Coverage reports are generated in `coverage/` directory when running `pnpm test:coverage`.
+
+### Writing Tests
+
+Tests are co-located with source files using the `.test.ts` suffix:
+```
+src/
+├── prompt-parser.ts
+├── prompt-parser.test.ts
+├── aider-output-parser.ts
+└── aider-output-parser.test.ts
+```
+
+---
+
 ## 🐛 Debugging
 
 ### View ACP Communication Logs in Zed
@@ -182,16 +221,18 @@ Aider: *receives context and makes improvements*
 - ✅ **Aider subprocess integration** with proper argument handling and file editing
 - ✅ **Real-time structured updates**: ACP-compliant plan updates, mode announcements, tool calls for edit diffs, and streaming message chunks
 - ✅ **Confirmation prompts aligned with ACP**: permission requests include titles, option kinds, and targeted apply/skip choices per the latest SDK expectations
+- ✅ **Slash command support**: `/add`, `/drop`, `/ls`, `/run` commands with validation
+- ✅ **Model selection**: Configurable models via environment variables
+- ✅ **Unit tests**: Vitest-based test suite with coverage reporting
 
 ---
 
 ## 🔮 Future Roadmap
 
-- [ ] **Diff parsing to ACP edits**: Convert SEARCH/REPLACE blocks to structured file_edit blocks
-- [ ] **Model selection**: UI for choosing Aider's LLM models
 - [ ] **File context**: Better integration with Zed's file selection
-- [ ] **Slash commands**: Implement aider slash commands for quick actions
+- [ ] **Additional slash commands**: Expand supported Aider commands
 - [ ] **ACP-aligned output formatting**: Normalize all Aider messages (user input prompts, errors, additional info) to ACP message kinds and preserve formatting
+- [ ] **Integration tests**: End-to-end testing with mocked ACP client
 
 ---
 

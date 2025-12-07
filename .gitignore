@@ -4,3 +4,9 @@ node_modules/
 
 # dist files
 dist/
+
+# Test coverage
+coverage/
+
+# Local History (VS Code extension)
+.history/

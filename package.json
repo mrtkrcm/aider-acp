@@ -9,7 +9,10 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.7.0",
@@ -17,6 +20,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.9.1",
-    "typescript": "^5.9.3"
+    "@vitest/coverage-v8": "^4.0.15",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
   }
 }
