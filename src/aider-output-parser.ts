@@ -628,18 +628,52 @@ function isValidFilePath(path: string): boolean {
   );
 }
 
-export function convertEditBlocksToACPDiffs(editBlocks: EditBlock[]): Array<{
-  type: "diff";
+export interface AcpFileEdit {
+  type: "file_edit";
   path: string;
-  oldText: string | null;
-  newText: string;
-}> {
-  return editBlocks.map((block) => ({
-    type: "diff" as const,
-    path: block.path,
-    oldText: block.oldText || null,
-    newText: block.newText,
-  }));
+  edits: Array<
+    | {
+        kind: "search_replace";
+        search: string;
+        replace: string;
+      }
+    | {
+        kind: "whole_file";
+        replace: string;
+      }
+  >;
+}
+
+export function convertEditBlocksToACPDiffs(
+  editBlocks: EditBlock[],
+): AcpFileEdit[] {
+  return editBlocks.map((block) => {
+    const edits: AcpFileEdit["edits"] = [];
+
+    if (
+      block.format === "diff" ||
+      block.format === "diff-fenced" ||
+      block.format === "editor-diff" ||
+      (block.oldText && block.oldText.length > 0)
+    ) {
+      edits.push({
+        kind: "search_replace",
+        search: block.oldText ?? "",
+        replace: block.newText,
+      });
+    } else {
+      edits.push({
+        kind: "whole_file",
+        replace: block.newText,
+      });
+    }
+
+    return {
+      type: "file_edit" as const,
+      path: block.path,
+      edits,
+    } satisfies AcpFileEdit;
+  });
 }
 
 export function formatAiderInfo(info: AiderInfo): string {
@@ -696,6 +730,15 @@ from flask import Flask
   const diffResult = parseAiderOutput(diffFormatOutput);
   console.log("Edit blocks found:", diffResult.editBlocks.length);
   console.log("Edit block:", diffResult.editBlocks[0]);
+
+  const diffFileEdits = convertEditBlocksToACPDiffs(diffResult.editBlocks);
+  if (
+    diffFileEdits[0]?.edits[0]?.kind !== "search_replace" ||
+    diffFileEdits[0]?.edits[0]?.search.trim() !== "from flask import Flask" ||
+    diffFileEdits[0]?.edits[0]?.replace.trim() !== "import math\nfrom flask import Flask"
+  ) {
+    console.error("Search/replace block did not convert to ACP file_edit structure as expected");
+  }
 
   const diffFencedOutput = `\`\`\`
 mathweb/flask/app.py

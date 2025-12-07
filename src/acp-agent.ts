@@ -329,21 +329,23 @@ export class AiderAcpAgent implements protocol.Agent {
 
       // Enviar bloques de edición como tool calls con diffs ACP
       if (editBlocks.length > 0) {
-        const acpDiffs = convertEditBlocksToACPDiffs(editBlocks);
-        for (let i = 0; i < acpDiffs.length; i++) {
-          const diff = acpDiffs[i];
+        const fileEdits = convertEditBlocksToACPDiffs(editBlocks);
+        for (let i = 0; i < fileEdits.length; i++) {
+          const fileEdit = fileEdits[i];
           const toolCallId = `edit_${Date.now()}_${i}`;
 
           this.startToolCall(sessionId, session, {
             id: toolCallId,
             kind: "edit",
-            title: `Editing ${diff.path}`,
-            locations: [{ path: diff.path }],
+            title: `Applying edits to ${fileEdit.path}`,
+            locations: [{ path: fileEdit.path }],
           });
 
           this.completeToolCall(sessionId, session, toolCallId, {
             status: "completed",
-            content: [diff],
+            content: [
+              fileEdit as unknown as protocol.ToolCallContent,
+            ],
           });
         }
       }
