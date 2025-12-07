@@ -98,6 +98,133 @@ describe("parseSlashCommand", () => {
     // Parser normalizes multiple spaces when splitting/joining with \s+
     expect((result as Extract<SlashCommandResult, { kind: "command" }>).args).toBe("file1.ts file2.ts");
   });
+
+  // Mode commands
+  it("parses /ask command without arguments", () => {
+    const result = parseSlashCommand("/ask");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("ask");
+  });
+
+  it("parses /ask command with question", () => {
+    const result = parseSlashCommand("/ask what does this function do?");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).args).toBe("what does this function do?");
+  });
+
+  it("parses /code command", () => {
+    const result = parseSlashCommand("/code");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("code");
+  });
+
+  it("parses /architect command", () => {
+    const result = parseSlashCommand("/architect");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("architect");
+  });
+
+  // Git commands
+  it("parses /commit command without message", () => {
+    const result = parseSlashCommand("/commit");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("commit");
+  });
+
+  it("parses /commit command with message", () => {
+    const result = parseSlashCommand("/commit fix: resolve null pointer");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).args).toBe("fix: resolve null pointer");
+  });
+
+  it("parses /diff command", () => {
+    const result = parseSlashCommand("/diff");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("diff");
+  });
+
+  it("parses /undo command", () => {
+    const result = parseSlashCommand("/undo");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("undo");
+  });
+
+  // Execution commands
+  it("parses /test command with test command", () => {
+    const result = parseSlashCommand("/test npm run test");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("test");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).args).toBe("npm run test");
+  });
+
+  it("returns missing_args for /test without arguments", () => {
+    const result = parseSlashCommand("/test");
+    expect(result?.kind).toBe("missing_args");
+  });
+
+  it("parses /lint command", () => {
+    const result = parseSlashCommand("/lint");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("lint");
+  });
+
+  // Session commands
+  it("parses /clear command", () => {
+    const result = parseSlashCommand("/clear");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("clear");
+  });
+
+  it("parses /reset command", () => {
+    const result = parseSlashCommand("/reset");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("reset");
+  });
+
+  it("parses /tokens command", () => {
+    const result = parseSlashCommand("/tokens");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("tokens");
+  });
+
+  // Model command
+  it("parses /model command with model name", () => {
+    const result = parseSlashCommand("/model gpt-4-turbo");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("model");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).args).toBe("gpt-4-turbo");
+  });
+
+  it("returns missing_args for /model without arguments", () => {
+    const result = parseSlashCommand("/model");
+    expect(result?.kind).toBe("missing_args");
+  });
+
+  // Help command
+  it("parses /help command", () => {
+    const result = parseSlashCommand("/help");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("help");
+  });
+
+  it("parses /help command with topic", () => {
+    const result = parseSlashCommand("/help commands");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).args).toBe("commands");
+  });
+
+  // Read-only command
+  it("parses /read-only command with file", () => {
+    const result = parseSlashCommand("/read-only README.md");
+    expect(result?.kind).toBe("command");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).spec.name).toBe("read-only");
+    expect((result as Extract<SlashCommandResult, { kind: "command" }>).args).toBe("README.md");
+  });
+
+  it("returns missing_args for /read-only without arguments", () => {
+    const result = parseSlashCommand("/read-only");
+    expect(result?.kind).toBe("missing_args");
+  });
 });
 
 describe("formatSlashCommand", () => {
@@ -125,7 +252,26 @@ describe("formatSlashCommand", () => {
 describe("getAllowedSlashCommandNames", () => {
   it("returns sorted list of allowed commands", () => {
     const names = getAllowedSlashCommandNames();
-    expect(names).toEqual(["add", "drop", "ls", "run"]);
+    expect(names).toEqual([
+      "add",
+      "architect",
+      "ask",
+      "clear",
+      "code",
+      "commit",
+      "diff",
+      "drop",
+      "help",
+      "lint",
+      "ls",
+      "model",
+      "read-only",
+      "reset",
+      "run",
+      "test",
+      "tokens",
+      "undo",
+    ]);
   });
 
   it("returns a new array each time", () => {

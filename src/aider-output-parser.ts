@@ -42,12 +42,30 @@ export interface CodeBlock {
   content: string;
 }
 
+// Message classification for ACP output formatting
+export type AiderMessageType =
+  | "info"           // System info (version, model, repo)
+  | "progress"       // Token/cost updates
+  | "file_action"    // File added/dropped messages
+  | "warning"        // Warnings
+  | "error"          // Errors
+  | "prompt"         // Y/N prompts
+  | "content"        // Main content/response
+  | "command_echo";  // Echo of user command
+
+export interface ClassifiedMessage {
+  type: AiderMessageType;
+  text: string;
+  raw: string;
+}
+
 export interface ParsedAiderOutput {
   info: AiderInfo;
   userMessage: string;
   editBlocks: EditBlock[];
   codeBlocks: CodeBlock[];
   prompts: string[];
+  classifiedMessages: ClassifiedMessage[];
 }
 
 interface DiffSearchReplace {
@@ -128,6 +146,91 @@ segmentRule.setPattern(
 const segmentsRule = rule<AiderTokenKind, Segment[]>();
 segmentsRule.setPattern(rep_sc(segmentRule));
 
+/**
+ * Classifies a single line of Aider output into a message type for ACP formatting.
+ */
+export function classifyMessage(line: string): ClassifiedMessage {
+  const trimmed = line.trim();
+  const raw = line;
+
+  // Empty lines are content
+  if (trimmed.length === 0) {
+    return { type: "content", text: trimmed, raw };
+  }
+
+  // Command echo (user input)
+  if (line.startsWith("> ") || line.startsWith("$ ")) {
+    return { type: "command_echo", text: trimmed, raw };
+  }
+
+  // Prompts
+  if (
+    /\(Y\)es/.test(trimmed) ||
+    /\(N\)o/.test(trimmed) ||
+    /\[Y\/n\]/i.test(trimmed) ||
+    /\[y\/N\]/i.test(trimmed)
+  ) {
+    return { type: "prompt", text: trimmed, raw };
+  }
+
+  // Errors
+  if (
+    trimmed.startsWith("Error:") ||
+    trimmed.startsWith("ERROR:") ||
+    trimmed.startsWith("Can't initialize git repo") ||
+    trimmed.startsWith("Unable to")
+  ) {
+    return { type: "error", text: trimmed, raw };
+  }
+
+  // Warnings
+  if (
+    trimmed.startsWith("Warning:") ||
+    trimmed.startsWith("WARNING:") ||
+    trimmed.startsWith("No suitable Python")
+  ) {
+    return { type: "warning", text: trimmed, raw };
+  }
+
+  // File actions
+  if (
+    /^Added .* to the chat/.test(trimmed) ||
+    /^Removed .* from the chat/.test(trimmed) ||
+    /^Dropping .* from the chat/.test(trimmed) ||
+    /^Add .* to the chat\?/.test(trimmed) ||
+    trimmed.startsWith("Create new file") ||
+    trimmed.startsWith("Read-only:")
+  ) {
+    return { type: "file_action", text: trimmed, raw };
+  }
+
+  // Info messages (version, model, repo, etc.)
+  if (
+    trimmed.startsWith("Aider v") ||
+    trimmed.startsWith("Main model:") ||
+    trimmed.startsWith("Weak model:") ||
+    trimmed.startsWith("Git repo:") ||
+    trimmed.startsWith("Repo-map:") ||
+    trimmed.startsWith("Use /help") ||
+    trimmed.startsWith("Models:")
+  ) {
+    return { type: "info", text: trimmed, raw };
+  }
+
+  // Progress/token updates
+  if (
+    trimmed.startsWith("Tokens:") ||
+    trimmed.startsWith("Cost:") ||
+    /sent \d+ tokens/.test(trimmed) ||
+    /received \d+ tokens/.test(trimmed)
+  ) {
+    return { type: "progress", text: trimmed, raw };
+  }
+
+  // Default to content
+  return { type: "content", text: trimmed, raw };
+}
+
 export function parseAiderOutput(output: string): ParsedAiderOutput {
   const info: AiderInfo = {
     warnings: [],
@@ -137,6 +240,7 @@ export function parseAiderOutput(output: string): ParsedAiderOutput {
   const editBlocks: EditBlock[] = [];
   const codeBlocks: CodeBlock[] = [];
   const promptMessages: string[] = [];
+  const classifiedMessages: ClassifiedMessage[] = [];
 
   const segments = parseSegmentsFromOutput(output);
 
@@ -150,6 +254,11 @@ export function parseAiderOutput(output: string): ParsedAiderOutput {
       const nextSegment = segments[index + 1];
       const normalizedLine = trimTrailingNewline(segment.text);
       const trimmedLine = normalizedLine.trim();
+
+      // Classify each line for ACP output formatting
+      if (normalizedLine.length > 0) {
+        classifiedMessages.push(classifyMessage(normalizedLine));
+      }
 
       if (collectPromptMessage(normalizedLine, promptMessages)) {
         capturingUserMessage = false;
@@ -219,6 +328,7 @@ export function parseAiderOutput(output: string): ParsedAiderOutput {
     editBlocks,
     codeBlocks,
     prompts: promptMessages,
+    classifiedMessages,
   };
 }
 

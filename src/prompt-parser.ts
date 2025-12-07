@@ -11,6 +11,7 @@ export type SlashCommandResult =
   | { kind: "malformed"; rawInput: string; available: string[] };
 
 const slashCommandAllowlist: Record<string, SlashCommandSpec> = {
+  // File management commands
   add: {
     name: "add",
     requiresArgs: true,
@@ -26,10 +27,92 @@ const slashCommandAllowlist: Record<string, SlashCommandSpec> = {
     requiresArgs: false,
     description: "List tracked files",
   },
+  "read-only": {
+    name: "read-only",
+    requiresArgs: true,
+    description: "Add file(s) as read-only reference",
+  },
+
+  // Mode commands
+  ask: {
+    name: "ask",
+    requiresArgs: false,
+    description: "Ask questions without editing files",
+  },
+  code: {
+    name: "code",
+    requiresArgs: false,
+    description: "Request code changes (default mode)",
+  },
+  architect: {
+    name: "architect",
+    requiresArgs: false,
+    description: "Use architect/editor mode with 2 models",
+  },
+
+  // Execution commands
   run: {
     name: "run",
     requiresArgs: true,
     description: "Execute a shell command via Aider",
+  },
+  test: {
+    name: "test",
+    requiresArgs: true,
+    description: "Run a test command, add output on failure",
+  },
+  lint: {
+    name: "lint",
+    requiresArgs: false,
+    description: "Lint and fix files in chat",
+  },
+
+  // Git commands
+  commit: {
+    name: "commit",
+    requiresArgs: false,
+    description: "Commit edits made outside the chat",
+  },
+  diff: {
+    name: "diff",
+    requiresArgs: false,
+    description: "Display diff of changes since last message",
+  },
+  undo: {
+    name: "undo",
+    requiresArgs: false,
+    description: "Undo the last git commit by aider",
+  },
+
+  // Session commands
+  clear: {
+    name: "clear",
+    requiresArgs: false,
+    description: "Clear the chat history",
+  },
+  reset: {
+    name: "reset",
+    requiresArgs: false,
+    description: "Drop all files and clear chat history",
+  },
+  tokens: {
+    name: "tokens",
+    requiresArgs: false,
+    description: "Report token usage for current context",
+  },
+
+  // Model commands
+  model: {
+    name: "model",
+    requiresArgs: true,
+    description: "Switch to a different LLM model",
+  },
+
+  // Help commands
+  help: {
+    name: "help",
+    requiresArgs: false,
+    description: "Get help about aider commands",
   },
 };
 
@@ -74,7 +157,7 @@ export function formatSlashCommand(result: Extract<SlashCommandResult, { kind: "
 }
 
 export function getAllowedSlashCommandNames(): string[] {
-  return Object.keys(slashCommandAllowlist).sort();
+  return Object.keys(slashCommandAllowlist).sort((a, b) => a.localeCompare(b));
 }
 
 export function testSlashCommandParser(): void {

@@ -1,5 +1,11 @@
 import { AiderProcessManager } from "./aider-runner.js";
 
+// File tracking with edit/read-only distinction
+export interface TrackedFile {
+  path: string;
+  mode: "editable" | "read-only";
+}
+
 // This will be the main state for each session.
 // We are keeping it separate from the SDK types as it's internal to our agent.
 export interface SessionState {
@@ -7,6 +13,7 @@ export interface SessionState {
   created: Date;
   model: string;
   files: string[];
+  readOnlyFiles: string[];
   workingDir: string;
   aiderProcess?: AiderProcessManager;
   commandQueue: string[];

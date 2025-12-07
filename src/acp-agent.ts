@@ -142,6 +142,7 @@ export class AiderAcpAgent implements protocol.Agent {
       created: new Date(),
       model,
       files: [],
+      readOnlyFiles: [],
       workingDir,
       aiderProcess,
       commandQueue: [],
@@ -425,58 +426,59 @@ export class AiderAcpAgent implements protocol.Agent {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     processManager.on("data", (data: string) => {
-      // Parse the complete data first to extract edit blocks
+      // Parse the complete data to extract structured output
       const parsedOutput = parseAiderOutput(data);
-      const { info, userMessage, editBlocks, codeBlocks, prompts } =
+      const { info, userMessage, editBlocks, codeBlocks, prompts, classifiedMessages } =
         parsedOutput;
 
-      // Then filter only the remaining text for display, avoiding interference with edit blocks
-      const processedLines = data
-        .split("\n")
-        .map((line) => {
-          // Only filter command echoes ("> command"), not diff markers
-          if (
-            line.startsWith("> ") &&
-            !line.includes(">>>") &&
-            !line.includes("<<<")
-          ) {
-            return null;
+      // Send file action messages with emoji formatting
+      const fileActions = classifiedMessages
+        .filter((msg) => msg.type === "file_action")
+        .map((msg) => {
+          if (msg.text.startsWith("Added ") || msg.text.startsWith("Removed ")) {
+            return `📁 ${msg.text}`;
           }
-          // Don't process lines that are part of code blocks or edit blocks
-          if (
-            line.startsWith("```") ||
-            line.includes("<<<<<<< SEARCH") ||
-            line.includes(">>>>>>> REPLACE") ||
-            line.includes("=======")
-          ) {
-            return null;
+          if (msg.text.includes("already in the chat")) {
+            return `⚠️ ${msg.text}`;
           }
-          // Agregar emoji a mensajes de archivos añadidos
-          if (line.startsWith("Added ")) {
-            return `📁 ${line}`;
-          }
-          // Agregar emoji de advertencia a mensajes de archivos ya en el chat
-          if (line.includes("is already in the chat")) {
-            return `⚠️ ${line}`;
-          }
-          // Filtrar líneas que son solo nombres de archivo (sin prefijos)
-          if (
-            line.trim().length > 0 &&
-            !line.includes(":") &&
-            !line.includes(" ") &&
-            line.includes(".") &&
-            !line.startsWith("📁") &&
-            !line.startsWith("⚠️")
-          ) {
-            return null;
-          }
-          return line;
-        })
-        .filter((line) => line !== null) as string[];
+          return msg.text;
+        });
 
-      const processedData = processedLines.join("\n");
+      for (const action of fileActions) {
+        this.client.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: action },
+          },
+        });
+      }
 
-      // Formatear información de Aider si está presente
+      // Send warnings
+      const warnings = classifiedMessages.filter((msg) => msg.type === "warning");
+      for (const warning of warnings) {
+        this.client.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `⚠️ ${warning.text}` },
+          },
+        });
+      }
+
+      // Send errors from classified messages
+      const errors = classifiedMessages.filter((msg) => msg.type === "error");
+      for (const error of errors) {
+        this.client.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `❌ ${error.text}` },
+          },
+        });
+      }
+
+      // Format Aider system info if present
       if (Object.keys(info).length > 0) {
         const formattedInfo = formatAiderInfo(info);
         if (formattedInfo.trim().length > 0) {
@@ -490,7 +492,7 @@ export class AiderAcpAgent implements protocol.Agent {
         }
       }
 
-      // Mostrar solicitudes de confirmación/texto interactivo
+      // Show confirmation prompts / interactive text
       for (const promptLine of prompts) {
         this.client.sessionUpdate({
           sessionId,
@@ -504,7 +506,7 @@ export class AiderAcpAgent implements protocol.Agent {
         });
       }
 
-      // Enviar mensaje del usuario si está presente
+      // Send user message (main content) if present
       if (userMessage.trim().length > 0) {
         this.client.sessionUpdate({
           sessionId,
@@ -515,7 +517,7 @@ export class AiderAcpAgent implements protocol.Agent {
         });
       }
 
-      // Enviar bloques de edición como tool calls con diffs ACP
+      // Send edit blocks as tool calls with ACP diffs
       if (editBlocks.length > 0) {
         const acpDiffs = convertEditBlocksToACPDiffs(editBlocks, session.workingDir);
         for (let i = 0; i < acpDiffs.length; i++) {
@@ -536,7 +538,7 @@ export class AiderAcpAgent implements protocol.Agent {
         }
       }
 
-      // Enviar bloques de código si están presentes
+      // Send code blocks if present
       for (const codeBlock of codeBlocks) {
         this.client.sessionUpdate({
           sessionId,
@@ -686,7 +688,8 @@ ${errorStr}`,
     session: SessionState,
     resources: Array<protocol.ContentBlock>,
   ): Promise<void> {
-    const desiredPaths: string[] = [];
+    const desiredEditablePaths: string[] = [];
+    const desiredReadOnlyPaths: string[] = [];
     const seenPaths = new Set<string>();
 
     for (const block of resources) {
@@ -704,7 +707,13 @@ ${errorStr}`,
 
         if (!seenPaths.has(normalizedPath)) {
           seenPaths.add(normalizedPath);
-          desiredPaths.push(normalizedPath);
+          // Check annotations for read-only hint
+          const isReadOnly = this.isResourceReadOnly(block);
+          if (isReadOnly) {
+            desiredReadOnlyPaths.push(normalizedPath);
+          } else {
+            desiredEditablePaths.push(normalizedPath);
+          }
         }
         continue;
       }
@@ -733,60 +742,115 @@ ${errorStr}`,
 
         if (!seenPaths.has(normalizedPath)) {
           seenPaths.add(normalizedPath);
-          desiredPaths.push(normalizedPath);
+          // Check annotations for read-only hint
+          const isReadOnly = this.isResourceReadOnly(block);
+          if (isReadOnly) {
+            desiredReadOnlyPaths.push(normalizedPath);
+          } else {
+            desiredEditablePaths.push(normalizedPath);
+          }
         }
       }
     }
 
-    await this.removeDroppedFiles(sessionId, session, desiredPaths);
+    // Sync editable files
+    await this.syncFiles(sessionId, session, desiredEditablePaths, "editable");
 
-    for (const normalizedPath of desiredPaths) {
-      if (session.files.includes(normalizedPath)) {
-        continue;
-      }
+    // Sync read-only files
+    await this.syncFiles(sessionId, session, desiredReadOnlyPaths, "read-only");
 
-      session.aiderProcess?.sendCommand(`/add ${normalizedPath}`);
-      await this.waitForTurnCompletion(sessionId, session);
-      session.files.push(normalizedPath);
-    }
-
-    if (desiredPaths.length > 0 || session.files.length === 0) {
+    const totalFiles = session.files.length + session.readOnlyFiles.length;
+    if (desiredEditablePaths.length > 0 || desiredReadOnlyPaths.length > 0 || totalFiles === 0) {
       this.emitActiveFilesUpdate(sessionId, session);
     }
   }
 
-  private async removeDroppedFiles(
+  private isResourceReadOnly(block: protocol.ContentBlock): boolean {
+    // Check _meta or annotations for read-only hints
+    const meta = (block as { _meta?: Record<string, unknown> })._meta;
+    if (meta) {
+      if (meta.readOnly === true || meta.readonly === true) {
+        return true;
+      }
+      if (meta.mode === "read-only" || meta.mode === "readonly") {
+        return true;
+      }
+    }
+
+    // Check annotations if present
+    const annotations = (block as { annotations?: Record<string, unknown> }).annotations;
+    if (annotations) {
+      if (annotations.readOnly === true || annotations.readonly === true) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async syncFiles(
     sessionId: string,
     session: SessionState,
     desiredPaths: string[],
+    mode: "editable" | "read-only",
   ): Promise<void> {
-    const desiredSet = new Set(desiredPaths.map((filePath) => path.normalize(filePath)));
-    const droppedFiles = session.files.filter((filePath) => !desiredSet.has(filePath));
+    const currentFiles = mode === "editable" ? session.files : session.readOnlyFiles;
+    const command = mode === "editable" ? "/add" : "/read-only";
+    const dropCommand = "/drop";
 
-    if (droppedFiles.length === 0) {
-      return;
+    const desiredSet = new Set(desiredPaths.map((filePath) => path.normalize(filePath)));
+    const droppedFiles = currentFiles.filter((filePath) => !desiredSet.has(filePath));
+
+    // Drop files that are no longer desired
+    if (droppedFiles.length > 0) {
+      this.sendThought(
+        sessionId,
+        `Dropping ${mode} files: ${droppedFiles.map((filePath) => path.basename(filePath)).join(", ")}`,
+      );
+
+      for (const filePath of droppedFiles) {
+        if (session.cancelled) return;
+        session.aiderProcess?.sendCommand(`${dropCommand} ${filePath}`);
+        await this.waitForTurnCompletion(sessionId, session);
+      }
     }
 
-    this.sendThought(
-      sessionId,
-      `Dropping deselected files: ${droppedFiles.map((filePath) => path.basename(filePath)).join(", ")}`,
-    );
+    // Add new files
+    for (const normalizedPath of desiredPaths) {
+      if (currentFiles.includes(normalizedPath)) {
+        continue;
+      }
 
-    for (const filePath of droppedFiles) {
-      if (session.cancelled) return;
-
-      session.aiderProcess?.sendCommand(`/drop ${filePath}`);
+      session.aiderProcess?.sendCommand(`${command} ${normalizedPath}`);
       await this.waitForTurnCompletion(sessionId, session);
     }
 
-    session.files = session.files.filter((filePath) => desiredSet.has(filePath));
+    // Update session state
+    if (mode === "editable") {
+      session.files = desiredPaths.slice();
+    } else {
+      session.readOnlyFiles = desiredPaths.slice();
+    }
   }
 
   private emitActiveFilesUpdate(sessionId: string, session: SessionState): void {
-    const activeMessage =
-      session.files.length > 0
-        ? `Active files (${session.files.length}): ${session.files.join(", ")}`
-        : "No active files selected.";
+    const editableCount = session.files.length;
+    const readOnlyCount = session.readOnlyFiles.length;
+    const totalCount = editableCount + readOnlyCount;
+
+    let activeMessage: string;
+    if (totalCount === 0) {
+      activeMessage = "No active files selected.";
+    } else {
+      const parts: string[] = [];
+      if (editableCount > 0) {
+        parts.push(`Editable (${editableCount}): ${session.files.map((f) => path.basename(f)).join(", ")}`);
+      }
+      if (readOnlyCount > 0) {
+        parts.push(`Read-only (${readOnlyCount}): ${session.readOnlyFiles.map((f) => path.basename(f)).join(", ")}`);
+      }
+      activeMessage = `Active files: ${parts.join("; ")}`;
+    }
 
     this.sendThought(sessionId, activeMessage);
 
