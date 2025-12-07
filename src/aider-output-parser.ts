@@ -10,6 +10,7 @@ import {
   tok,
 } from "typescript-parsec";
 import * as path from "node:path";
+import { testSlashCommandParser } from "./prompt-parser.js";
 
 export interface AiderInfo {
   version?: string;
@@ -778,4 +779,6 @@ Cost: $0.02
   console.log("\n=== Testing Prompt Extraction ===");
   const promptResult = parseAiderOutput(promptOutput);
   console.log("Prompts:", promptResult.prompts);
+
+  testSlashCommandParser();
 }
