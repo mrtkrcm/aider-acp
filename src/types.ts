@@ -13,4 +13,24 @@ export interface SessionState {
   pendingPromptId?: string | number;
   lastPromptText?: string;
   cancelled?: boolean;
+  currentMode?: string;
+  currentPlan?: Plan;
+  activeToolCalls?: Map<string, ToolCallState>;
+}
+
+export interface ToolCallState {
+  id: string;
+  kind: string;
+  status: string;
+  startTime: number;
+}
+
+export interface Plan {
+  entries: PlanEntry[];
+}
+
+export interface PlanEntry {
+  content: string;
+  priority: "high" | "medium" | "low";
+  status: "pending" | "in_progress" | "completed";
 }

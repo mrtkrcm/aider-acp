@@ -12,7 +12,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.4.8",
+    "@agentclientprotocol/sdk": "^0.7.0",
     "typescript-parsec": "^0.3.4"
   },
   "devDependencies": {

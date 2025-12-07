@@ -1,7 +1,7 @@
 import * as protocol from "@agentclientprotocol/sdk";
 import * as fs from "fs";
 import * as path from "path";
-import { SessionState } from "./types.js";
+import { Plan, SessionState, ToolCallState } from "./types.js";
 import { AiderProcessManager, AiderState } from "./aider-runner.js";
 import {
   parseAiderOutput,
@@ -26,6 +26,11 @@ export class AiderAcpAgent implements protocol.Agent {
 
     return {
       protocolVersion: negotiatedProtocol,
+      agentInfo: {
+        name: "aider-acp",
+        title: "Aider ACP Agent",
+        version: "0.2.0",
+      },
       agentCapabilities: {
         loadSession: false,
         promptCapabilities: {
@@ -33,9 +38,18 @@ export class AiderAcpAgent implements protocol.Agent {
           audio: false,
           embeddedContext: true,
         },
-      },
+        // Added via ACP guide; not present in SDK 0.4.8 typings
+        sessionCapabilities: {
+          modes: true,
+          plans: true,
+        },
+        mcpCapabilities: {
+          http: false,
+          sse: false,
+        },
+      } as protocol.AgentCapabilities,
       authMethods: [],
-    };
+    } as protocol.InitializeResponse;
   }
 
   async newSession(
@@ -57,11 +71,17 @@ export class AiderAcpAgent implements protocol.Agent {
       workingDir,
       aiderProcess,
       commandQueue: [],
+      currentMode: "code",
+      activeToolCalls: new Map<string, ToolCallState>(),
     };
 
     this.sessions.set(sessionId, session);
     this.setupAiderListeners(sessionId, aiderProcess);
     aiderProcess.start();
+
+    if (session.currentMode) {
+      this.sendModeUpdate(sessionId, session.currentMode);
+    }
 
     return { sessionId };
   }
@@ -78,6 +98,7 @@ export class AiderAcpAgent implements protocol.Agent {
 
     // Clear any previous cancellation state for this turn
     session.cancelled = false;
+    session.currentPlan = undefined;
 
     // Separar el contenido de texto y los recursos
     this.validateContentBlocks(prompt);
@@ -101,14 +122,74 @@ export class AiderAcpAgent implements protocol.Agent {
 
     // Si estamos esperando confirmación, manejar directamente
     if (agentState === AiderState.WAITING_FOR_CONFIRMATION) {
-      session.aiderProcess.answerConfirmation(promptText);
-      await this.waitForTurnCompletion(sessionId, session);
-      return { stopReason: session.cancelled ? "cancelled" : "end_turn" };
+      const permissionRequest: protocol.RequestPermissionRequest = {
+        sessionId,
+        options: [
+          { kind: "allow_once", name: "Send confirmation", optionId: "allow_once" },
+          { kind: "reject_once", name: "Cancel", optionId: "reject_once" },
+        ],
+        toolCall: {
+          toolCallId: `confirm_${Date.now()}`,
+          title: promptText || "Continue with the pending confirmation?",
+          status: "pending",
+        },
+      };
+
+      const permission = await this.client.requestPermission(permissionRequest);
+
+      const selectedPermission = permission as unknown as {
+        outcome: string;
+        optionId?: string;
+      };
+      if (selectedPermission.outcome === "selected") {
+        if (selectedPermission.optionId === "allow_once") {
+          session.aiderProcess.answerConfirmation(promptText || "yes");
+          await this.waitForTurnCompletion(sessionId, session);
+          return { stopReason: session.cancelled ? "cancelled" : "end_turn" };
+        }
+
+        session.cancelled = true;
+        session.aiderProcess.interrupt();
+        return { stopReason: "cancelled" };
+      }
+
+      session.cancelled = true;
+      session.aiderProcess.interrupt();
+      return { stopReason: "cancelled" };
+    }
+
+    const plan: Plan = { entries: [] };
+    if (resources.length > 0) {
+      plan.entries.push({
+        content: `Add ${resources.length} resource(s)`,
+        priority: "high",
+        status: "in_progress",
+      });
+    }
+    if (promptText.trim().length > 0) {
+      plan.entries.push({
+        content: "Execute prompt text",
+        priority: "high",
+        status: resources.length > 0 ? "pending" : "in_progress",
+      });
+    }
+
+    if (plan.entries.length > 0) {
+      this.sendPlanUpdate(sessionId, session, plan);
     }
 
     // Manejar recursos primero (archivos)
     if (resources.length > 0) {
+      this.sendThought(sessionId, "Processing referenced resources.");
       await this.processResources(sessionId, session, resources);
+
+      if (plan.entries.length > 0 && plan.entries[0]) {
+        plan.entries[0].status = "completed";
+        if (plan.entries[1] && plan.entries[1].status === "pending") {
+          plan.entries[1].status = "in_progress";
+        }
+        this.sendPlanUpdate(sessionId, session, plan);
+      }
 
       if (session.cancelled) {
         return { stopReason: "cancelled" };
@@ -117,15 +198,36 @@ export class AiderAcpAgent implements protocol.Agent {
 
     // Después de procesar todos los recursos, enviar el texto del prompt si existe
     if (promptText.trim().length > 0) {
+      this.sendThought(sessionId, "Forwarding prompt text to Aider.");
       session.aiderProcess.sendCommand(promptText);
       // Esperar a que se complete el turno
       await this.waitForTurnCompletion(sessionId, session);
+
+      if (plan.entries.length > 0) {
+        const lastEntryIndex = plan.entries.length - 1;
+        plan.entries[lastEntryIndex].status = session.cancelled
+          ? plan.entries[lastEntryIndex].status
+          : "completed";
+        this.sendPlanUpdate(sessionId, session, plan);
+      }
 
       return { stopReason: session.cancelled ? "cancelled" : "end_turn" };
     } else {
       // Si no hay texto, simplemente terminar
       return { stopReason: session.cancelled ? "cancelled" : "end_turn" };
     }
+  }
+
+  async setMode(params: { sessionId: string; modeId: string }): Promise<Record<string, never>> {
+    const session = this.sessions.get(params.sessionId);
+    if (!session) {
+      throw new Error("Session not found");
+    }
+
+    session.currentMode = params.modeId;
+    this.sendModeUpdate(params.sessionId, params.modeId);
+
+    return {};
   }
 
   private setupAiderListeners(
@@ -232,17 +334,16 @@ export class AiderAcpAgent implements protocol.Agent {
           const diff = acpDiffs[i];
           const toolCallId = `edit_${Date.now()}_${i}`;
 
-          // Crear tool call para la edición
-          this.client.sessionUpdate({
-            sessionId,
-            update: {
-              sessionUpdate: "tool_call",
-              toolCallId,
-              title: `Editing ${diff.path}`,
-              kind: "edit",
-              status: "completed",
-              content: [diff],
-            },
+          this.startToolCall(sessionId, session, {
+            id: toolCallId,
+            kind: "edit",
+            title: `Editing ${diff.path}`,
+            locations: [{ path: diff.path }],
+          });
+
+          this.completeToolCall(sessionId, session, toolCallId, {
+            status: "completed",
+            content: [diff],
           });
         }
       }
@@ -304,18 +405,56 @@ ${errorStr}`,
     });
 
     processManager.on("confirmation_required", (question: string) => {
-      this.client.sessionUpdate({
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: {
-            type: "text",
-            text: `
-**Aider requires input:**
-${question}`,
+      const currentSession = this.sessions.get(sessionId);
+      if (!currentSession) return;
+
+      void (async () => {
+        this.client.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "Requesting permission to proceed with Aider confirmation.",
+            },
           },
-        },
-      });
+        });
+
+        const permissionRequest: protocol.RequestPermissionRequest = {
+          sessionId,
+          options: [
+            { kind: "allow_once", name: "Allow this time", optionId: "allow_once" },
+            { kind: "allow_always", name: "Always allow", optionId: "allow_always" },
+            { kind: "reject_once", name: "Deny", optionId: "reject_once" },
+            { kind: "reject_always", name: "Always deny", optionId: "reject_always" },
+          ],
+          toolCall: {
+            toolCallId: `confirm_${Date.now()}`,
+            title: question,
+            status: "pending",
+          },
+        };
+
+        const result = await this.client.requestPermission(permissionRequest);
+
+        const selectedResult = result as unknown as {
+          outcome: string;
+          optionId?: string;
+        };
+        if (selectedResult.outcome === "selected") {
+          if (selectedResult.optionId?.startsWith("allow")) {
+            currentSession.aiderProcess?.answerConfirmation("yes");
+            return;
+          }
+
+          currentSession.cancelled = true;
+          currentSession.aiderProcess?.interrupt();
+          return;
+        }
+
+        currentSession.cancelled = true;
+        currentSession.aiderProcess?.interrupt();
+      })();
     });
 
     processManager.on("exit", (message: string) => {
@@ -480,6 +619,105 @@ ${question}`,
       if (block.type === "resource" && !block.resource?.uri?.trim()) {
         throw new Error("Embedded resource blocks must include a non-empty URI");
       }
+    }
+  }
+
+  private sendThought(sessionId: string, text: string): void {
+    this.client.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text },
+      },
+    });
+  }
+
+  private sendPlanUpdate(sessionId: string, session: SessionState, plan: Plan): void {
+    session.currentPlan = plan;
+    this.client.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "plan",
+        entries: plan.entries,
+      },
+    });
+  }
+
+  private startToolCall(
+    sessionId: string,
+    session: SessionState,
+    details: {
+      id: string;
+      kind: protocol.ToolKind;
+      title: string;
+      locations?: protocol.ToolCallLocation[];
+    },
+  ): void {
+    const state: ToolCallState = {
+      id: details.id,
+      kind: details.kind,
+      status: "in_progress",
+      startTime: Date.now(),
+    };
+    session.activeToolCalls?.set(details.id, state);
+
+    this.client.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: details.id,
+        title: details.title,
+        kind: details.kind,
+        status: "in_progress",
+        locations: details.locations,
+      },
+    });
+  }
+
+  private completeToolCall(
+    sessionId: string,
+    session: SessionState,
+    toolCallId: string,
+    update: {
+      status: protocol.ToolCallStatus;
+      content?: protocol.ToolCallContent[];
+    },
+  ): void {
+    this.client.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        status: update.status,
+        content: update.content,
+      },
+    });
+
+    const state = session.activeToolCalls?.get(toolCallId);
+    if (state) {
+      state.status = update.status;
+    }
+  }
+
+  private sendModeUpdate(sessionId: string, modeId: string): void {
+    this.client.sessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: "current_mode_update",
+        currentModeId: modeId,
+      },
+    });
+  }
+
+  private getModeDisplayName(modeId: string): string {
+    switch (modeId) {
+      case "plan":
+        return "Plan Mode";
+      case "architect":
+        return "Architect Mode";
+      case "code":
+      default:
+        return "Code Mode";
     }
   }
 
