@@ -1,5 +1,7 @@
 # aider-acp
 
+This repository is the actively maintained fork of the Aider ACP bridge, focused on staying aligned with the latest ACP session update semantics (plans, tool calls, and mode updates).
+
 An [Agent Client Protocol (ACP)](https://zed.dev/blog/bring-your-own-agent-to-zed) bridge that integrates [Aider](https://aider.chat) into editors like [Zed](https://zed.dev).
 This project allows you to use Aider as an AI coding assistant inside Zed, review diffs, and apply changes seamlessly.
 
@@ -57,7 +59,7 @@ aider-acp/
 ### 1. Clone and setup the project
 
 ```bash
-git clone <your-repo-url>
+git clone <your-fork-url>
 cd aider-acp
 # Install dependencies (use npm if you don't have pnpm)
 pnpm install  # or npm install
@@ -128,9 +130,9 @@ Aider: *receives context and makes improvements*
 
 ### ACP Protocol Flow
 1. **Initialization**: Zed sends `initialize` → Agent responds with capabilities
-2. **Session Creation**: Zed sends `session/new` → Agent creates session context
+2. **Session Creation**: Zed sends `session/new` → Agent creates session context and announces the current mode
 3. **Prompt Processing**: Zed sends `session/prompt` → Agent processes with Aider
-4. **Real-time Updates**: Agent sends `session/update` notifications during execution
+4. **Real-time Updates**: Agent sends structured `session/update` notifications (plans, tool calls for edits, mode updates, and message chunks) during execution
 5. **Completion**: Agent responds with `stopReason: "end_turn"`
 
 ### Technical Implementation
@@ -155,8 +157,9 @@ Aider: *receives context and makes improvements*
 ## ✅ Current Status
 
 - ✅ **Basic ACP loop** (initialize + session management + prompt and response)
-- ✅ **Aider subprocess integration** with proper argument handling and file editing.
-- ✅ **Real-time streaming updates** via session/update notifications
+- ✅ **Aider subprocess integration** with proper argument handling and file editing
+- ✅ **Real-time structured updates**: ACP-compliant plan updates, mode announcements, tool calls for edit diffs, and streaming message chunks
+- ✅ **Confirmation prompts aligned with ACP**: permission requests include titles, option kinds, and targeted apply/skip choices per the latest SDK expectations
 
 ---
 
@@ -166,7 +169,7 @@ Aider: *receives context and makes improvements*
 - [ ] **Model selection**: UI for choosing Aider's LLM models
 - [ ] **File context**: Better integration with Zed's file selection
 - [ ] **Slash commands**: Implement aider slash commands for quick actions
-- [ ] **Format Output**: Correctly format all aider mensajes (ask for user input, error mensages, additional info, etc)
+- [ ] **ACP-aligned output formatting**: Normalize all Aider messages (user input prompts, errors, additional info) to ACP message kinds and preserve formatting
 
 ---
 
