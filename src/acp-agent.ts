@@ -122,27 +122,27 @@ export class AiderAcpAgent implements protocol.Agent {
 
     // Si estamos esperando confirmación, manejar directamente
     if (agentState === AiderState.WAITING_FOR_CONFIRMATION) {
-      const permissionRequest: protocol.RequestPermissionRequest = {
+      const permissionRequest = {
         sessionId,
         options: [
-          { kind: "allow_once", name: "Send confirmation", optionId: "allow_once" },
-          { kind: "reject_once", name: "Cancel", optionId: "reject_once" },
+          { kind: "allow_once", name: "Send confirmation", title: "Send confirmation" },
+          { kind: "reject_once", name: "Cancel", title: "Cancel" },
         ],
         toolCall: {
           toolCallId: `confirm_${Date.now()}`,
           title: promptText || "Continue with the pending confirmation?",
           status: "pending",
         },
-      };
+      } as unknown as protocol.RequestPermissionRequest;
 
       const permission = await this.client.requestPermission(permissionRequest);
 
       const selectedPermission = permission as unknown as {
         outcome: string;
-        optionId?: string;
+        optionKind?: string;
       };
       if (selectedPermission.outcome === "selected") {
-        if (selectedPermission.optionId === "allow_once") {
+        if (selectedPermission.optionKind?.startsWith("allow")) {
           session.aiderProcess.answerConfirmation(promptText || "yes");
           await this.waitForTurnCompletion(sessionId, session);
           return { stopReason: session.cancelled ? "cancelled" : "end_turn" };
@@ -420,29 +420,29 @@ ${errorStr}`,
           },
         });
 
-        const permissionRequest: protocol.RequestPermissionRequest = {
+        const permissionRequest = {
           sessionId,
           options: [
-            { kind: "allow_once", name: "Allow this time", optionId: "allow_once" },
-            { kind: "allow_always", name: "Always allow", optionId: "allow_always" },
-            { kind: "reject_once", name: "Deny", optionId: "reject_once" },
-            { kind: "reject_always", name: "Always deny", optionId: "reject_always" },
+            { kind: "allow_once", name: "Allow this time", title: "Allow this time" },
+            { kind: "allow_always", name: "Always allow", title: "Always allow" },
+            { kind: "reject_once", name: "Deny", title: "Deny" },
+            { kind: "reject_always", name: "Always deny", title: "Always deny" },
           ],
           toolCall: {
             toolCallId: `confirm_${Date.now()}`,
             title: question,
             status: "pending",
           },
-        };
+        } as unknown as protocol.RequestPermissionRequest;
 
         const result = await this.client.requestPermission(permissionRequest);
 
         const selectedResult = result as unknown as {
           outcome: string;
-          optionId?: string;
+          optionKind?: string;
         };
         if (selectedResult.outcome === "selected") {
-          if (selectedResult.optionId?.startsWith("allow")) {
+          if (selectedResult.optionKind?.startsWith("allow")) {
             currentSession.aiderProcess?.answerConfirmation("yes");
             return;
           }
@@ -639,8 +639,9 @@ ${errorStr}`,
       update: {
         sessionUpdate: "plan",
         entries: plan.entries,
+        plan,
       },
-    });
+    } as unknown as protocol.SessionNotification);
   }
 
   private startToolCall(
@@ -705,8 +706,9 @@ ${errorStr}`,
       update: {
         sessionUpdate: "current_mode_update",
         currentModeId: modeId,
+        mode: { id: modeId, name: this.getModeDisplayName(modeId) },
       },
-    });
+    } as unknown as protocol.SessionNotification);
   }
 
   private getModeDisplayName(modeId: string): string {

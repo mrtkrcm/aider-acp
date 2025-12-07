@@ -59,8 +59,18 @@ aider-acp/
 ```bash
 git clone <your-repo-url>
 cd aider-acp
+# Install dependencies (use npm if you don't have pnpm)
 pnpm install  # or npm install
-pnpm run build
+
+# Compile the TypeScript sources
+pnpm run build  # or npm run build
+```
+
+For a fast smoke test without Zed, you can run the parser test harness:
+
+```bash
+npm run build
+node dist/index.js --test-parser
 ```
 
 ### 2. Test the agent standalone
