@@ -8,6 +8,11 @@ import {
   formatAiderInfo,
   convertEditBlocksToACPDiffs,
 } from "./aider-output-parser.js";
+import {
+  formatSlashCommand,
+  getAllowedSlashCommandNames,
+  parseSlashCommand,
+} from "./prompt-parser.js";
 
 const DEFAULT_MODELS: protocol.ModelInfo[] = [
   {
@@ -266,6 +271,82 @@ export class AiderAcpAgent implements protocol.Agent {
     }
 
     const plan: Plan = { entries: [] };
+    const slashCommand = promptText ? parseSlashCommand(promptText) : null;
+
+    if (slashCommand) {
+      const planEntryContent =
+        slashCommand.kind === "command"
+          ? `Run ${formatSlashCommand(slashCommand)}`
+          : "Validate slash command";
+
+      const slashPlan: Plan = {
+        entries: [
+          {
+            content: planEntryContent,
+            priority: "high",
+            status: "in_progress",
+          },
+        ],
+      };
+
+      this.sendPlanUpdate(sessionId, session, slashPlan);
+
+      if (resources.length > 0) {
+        this.sendAgentMessage(
+          sessionId,
+          "⚠️ Slash commands ignore attached resources; the resources were skipped for this turn.",
+        );
+      }
+
+      if (slashCommand.kind === "command") {
+        const aiderCommand = formatSlashCommand(slashCommand);
+        this.sendThought(sessionId, `Dispatching ${aiderCommand} to Aider.`);
+        session.aiderProcess.sendCommand(aiderCommand);
+        await this.waitForTurnCompletion(sessionId, session);
+
+        const entry = slashPlan.entries[0];
+        if (entry) {
+          entry.status = session.cancelled ? entry.status : "completed";
+        }
+        this.sendPlanUpdate(sessionId, session, slashPlan);
+        this.sendAgentMessage(
+          sessionId,
+          session.cancelled
+            ? `⚠️ ${aiderCommand} was interrupted.`
+            : `✅ Completed ${aiderCommand}.`,
+        );
+
+        return { stopReason: session.cancelled ? "cancelled" : "end_turn" };
+      }
+
+      const allowedList = getAllowedSlashCommandNames().map((name) => `/${name}`).join(", ");
+
+      if (slashCommand.kind === "missing_args") {
+        this.sendAgentMessage(
+          sessionId,
+          `⚠️ The /${slashCommand.spec.name} command requires additional arguments. Example: /${slashCommand.spec.name} ${slashCommand.spec.description.toLowerCase()}.`,
+        );
+      } else if (slashCommand.kind === "malformed") {
+        this.sendAgentMessage(
+          sessionId,
+          `⚠️ Please provide a slash command name after '/'. Allowed commands: ${allowedList}.`,
+        );
+      } else {
+        this.sendAgentMessage(
+          sessionId,
+          `⚠️ Unknown slash command '/${slashCommand.commandName}'. Allowed commands: ${allowedList}.`,
+        );
+      }
+
+      const entry = slashPlan.entries[0];
+      if (entry) {
+        entry.status = "completed";
+      }
+      this.sendPlanUpdate(sessionId, session, slashPlan);
+
+      return { stopReason: "end_turn" };
+    }
+
     if (resources.length > 0) {
       plan.entries.push({
         content: `Add ${resources.length} resource(s)`,
